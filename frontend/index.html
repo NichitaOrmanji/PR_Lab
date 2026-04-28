@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ToDo List</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #f0f2f5; color: #222; }
+    header { background: #4f46e5; color: #fff; padding: 18px 32px; font-size: 22px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
+    .ws-status { font-size: 13px; font-weight: 400; display: flex; align-items: center; gap: 6px; }
+    .ws-dot { width: 10px; height: 10px; border-radius: 50%; background: #f87171; }
+    .ws-dot.connected { background: #34d399; }
+    .container { max-width: 860px; margin: 32px auto; padding: 0 16px; }
+    .card { background: #fff; border-radius: 10px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #333; }
+    input[type="text"], textarea, input[type="email"] {
+      width: 100%; padding: 9px 12px; border: 1px solid #d1d5db;
+      border-radius: 6px; font-size: 14px; margin-bottom: 10px;
+    }
+    textarea { resize: vertical; height: 64px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; }
+    button { padding: 9px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; }
+    .btn-primary { background: #4f46e5; color: #fff; }
+    .btn-primary:hover { background: #4338ca; }
+    .btn-danger  { background: #ef4444; color: #fff; }
+    .btn-danger:hover  { background: #dc2626; }
+    .btn-gray    { background: #e5e7eb; color: #374151; }
+    .btn-gray:hover    { background: #d1d5db; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { background: #f9fafb; text-align: left; padding: 10px 12px; border-bottom: 2px solid #e5e7eb; font-weight: 600; }
+    td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+    tr:hover td { background: #fafafa; }
+    .done-text { text-decoration: line-through; color: #9ca3af; }
+    .badge { display:inline-block; padding:2px 10px; border-radius:12px; font-size:12px; font-weight:600; }
+    .badge-done { background:#d1fae5; color:#065f46; }
+    .badge-todo { background:#e0e7ff; color:#3730a3; }
+    .td-actions { white-space: nowrap; display: flex; gap: 6px; }
+    .overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:100; align-items:center; justify-content:center; }
+    .overlay.active { display:flex; }
+    .modal { background:#fff; border-radius:12px; padding:28px; width:400px; max-width:95vw; }
+    .modal h3 { margin-bottom:16px; font-size:17px; }
+    .modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:14px; }
+    .msg { padding:10px 14px; border-radius:6px; margin-bottom:12px; font-size:13px; display:none; }
+    .msg.ok  { background:#d1fae5; color:#065f46; display:block; }
+    .msg.err { background:#fee2e2; color:#991b1b; display:block; }
+  </style>
+</head>
+<body>
+<header>
+  📋 ToDo List
+  <div class="ws-status">
+    <div class="ws-dot" id="ws-dot"></div>
+    <span id="ws-label">Disconnected</span>
+  </div>
+</header>
+
+<div class="container">
+
+  <div class="card">
+    <h2>Add new task</h2>
+    <input type="text" id="new-title" placeholder="Task title *"/>
+    <textarea id="new-desc" placeholder="Description (optional)"></textarea>
+    <button class="btn-primary" onclick="createTask()">+ Add task</button>
+  </div>
+
+  <div class="card">
+    <h2>Tasks</h2>
+    <div id="msg" class="msg"></div>
+    <table id="task-table">
+      <thead>
+        <tr>
+          <th style="width:40px">#</th>
+          <th>Title</th>
+          <th>Description</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="task-body"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>📧 Send task list by email (SMTP)</h2>
+    <input type="email" id="email-to" placeholder="Recipient email"/>
+    <input type="text"  id="email-subject" placeholder="Subject" value="My task list"/>
+    <div class="row">
+      <button class="btn-primary" onclick="sendEmail()">Send list</button>
+      <button class="btn-gray"    onclick="loadImap()">Check inbox (IMAP)</button>
+      <button class="btn-gray"    onclick="loadPop3()">Check inbox (POP3)</button>
+    </div>
+    <pre id="email-result" style="margin-top:14px;font-size:12px;background:#f9fafb;padding:12px;border-radius:6px;white-space:pre-wrap;display:none"></pre>
+  </div>
+
+</div>
+
+<div class="overlay" id="edit-overlay">
+  <div class="modal">
+    <h3>Edit task</h3>
+    <input type="hidden" id="edit-id"/>
+    <input type="text" id="edit-title" placeholder="Title"/>
+    <textarea id="edit-desc" placeholder="Description"></textarea>
+    <label style="font-size:13px;display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <input type="checkbox" id="edit-done"/> Mark as done
+    </label>
+    <div class="modal-actions">
+      <button class="btn-gray" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="saveEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="detail-overlay">
+  <div class="modal">
+    <h3 id="detail-title"></h3>
+    <p style="font-size:13px;color:#666;margin-bottom:8px" id="detail-desc"></p>
+    <p style="font-size:12px;color:#9ca3af" id="detail-date"></p>
+    <div class="modal-actions">
+      <button class="btn-gray" onclick="closeDetail()">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = "http://localhost:5000";
+
+// ── WebSocket ──────────────────────────────────────────────────────────────────
+const socket = io({ transports: ["websocket"] });
+
+socket.on("connect", () => {
+  document.getElementById("ws-dot").classList.add("connected");
+  document.getElementById("ws-label").textContent = "Connected";
+});
+
+socket.on("disconnect", () => {
+  document.getElementById("ws-dot").classList.remove("connected");
+  document.getElementById("ws-label").textContent = "Disconnected";
+});
+
+socket.on("tasks_updated", (tasks) => {
+  renderTasks(tasks);
+});
+
+// ── Tasks ──────────────────────────────────────────────────────────────────────
+function renderTasks(tasks) {
+  const tbody = document.getElementById("task-body");
+  tbody.innerHTML = "";
+  tasks.forEach(t => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${t.id}</td>
+      <td class="${t.done ? 'done-text' : ''}">${t.title}</td>
+      <td style="color:#6b7280">${t.description || '—'}</td>
+      <td><span class="badge ${t.done ? 'badge-done' : 'badge-todo'}">${t.done ? 'Done' : 'Todo'}</span></td>
+      <td>
+        <div class="td-actions">
+          <button class="btn-gray" style="padding:5px 10px;font-size:12px" onclick="showDetail(${t.id})">View</button>
+          <button class="btn-primary" style="padding:5px 10px;font-size:12px" onclick="openEdit(${t.id},'${escape(t.title)}','${escape(t.description||'')}',${t.done})">Edit</button>
+          <button class="btn-danger" style="padding:5px 10px;font-size:12px" onclick="deleteTask(${t.id})">Delete</button>
+        </div>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function createTask() {
+  const title = document.getElementById("new-title").value.trim();
+  const desc  = document.getElementById("new-desc").value.trim();
+  if (!title) return showMsg("Title is required", true);
+  await fetch(`${API}/tasks`, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({title, description: desc})
+  });
+  document.getElementById("new-title").value = "";
+  document.getElementById("new-desc").value  = "";
+  showMsg("Task added!");
+}
+
+async function deleteTask(id) {
+  if (!confirm("Delete this task?")) return;
+  await fetch(`${API}/tasks/${id}`, {method:"DELETE"});
+  showMsg("Task deleted!");
+}
+
+function openEdit(id, title, desc, done) {
+  document.getElementById("edit-id").value    = id;
+  document.getElementById("edit-title").value = unescape(title);
+  document.getElementById("edit-desc").value  = unescape(desc);
+  document.getElementById("edit-done").checked = done;
+  document.getElementById("edit-overlay").classList.add("active");
+}
+function closeModal() { document.getElementById("edit-overlay").classList.remove("active"); }
+
+async function saveEdit() {
+  const id    = document.getElementById("edit-id").value;
+  const title = document.getElementById("edit-title").value.trim();
+  const desc  = document.getElementById("edit-desc").value.trim();
+  const done  = document.getElementById("edit-done").checked;
+  await fetch(`${API}/tasks/${id}`, {
+    method: "PUT",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({title, description: desc, done})
+  });
+  closeModal();
+  showMsg("Task updated!");
+}
+
+async function showDetail(id) {
+  const res = await fetch(`${API}/tasks/${id}`);
+  const t = await res.json();
+  document.getElementById("detail-title").textContent = t.title;
+  document.getElementById("detail-desc").textContent  = t.description || "No description";
+  document.getElementById("detail-date").textContent  = "Created: " + t.created_at;
+  document.getElementById("detail-overlay").classList.add("active");
+}
+function closeDetail() { document.getElementById("detail-overlay").classList.remove("active"); }
+
+// ── Email ──────────────────────────────────────────────────────────────────────
+async function sendEmail() {
+  const to      = document.getElementById("email-to").value.trim();
+  const subject = document.getElementById("email-subject").value.trim();
+  if (!to) return alert("Enter recipient email");
+  const res = await fetch(`${API}/tasks`);
+  const tasks = await res.json();
+  const body = tasks.map(t => `[${t.done ? "v" : " "}] ${t.title} — ${t.description || "no description"}`).join("\n");
+  const r = await fetch(`${API}/email/send`, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({to, subject, body})
+  });
+  showEmailResult(await r.json());
+}
+
+async function loadImap() {
+  const r = await fetch(`${API}/email/inbox/imap`);
+  showEmailResult(await r.json());
+}
+
+async function loadPop3() {
+  const r = await fetch(`${API}/email/inbox/pop3`);
+  showEmailResult(await r.json());
+}
+
+function showEmailResult(data) {
+  const el = document.getElementById("email-result");
+  el.style.display = "block";
+  el.textContent = JSON.stringify(data, null, 2);
+}
+
+function showMsg(text, isErr = false) {
+  const el = document.getElementById("msg");
+  el.textContent = text;
+  el.className = "msg " + (isErr ? "err" : "ok");
+  setTimeout(() => { el.className = "msg"; }, 3000);
+}
+</script>
+</body>
+</html>
