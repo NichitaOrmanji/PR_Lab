@@ -60,6 +60,7 @@ jobs:
             --network lab3-net \
             -p 8080:80 \
             igorbogaci/frontend:latest
+            sleep 5
 
       - name: Test backend API
         run: |
