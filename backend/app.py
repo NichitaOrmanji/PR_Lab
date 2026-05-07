@@ -55,7 +55,7 @@ def fetch_all_tasks():
     ]
 
 
-# ── TASKS ──────────────────────────────────────────────────────────────────────
+
 
 @app.route("/tasks", methods=["GET"])
 def get_tasks():
@@ -122,7 +122,7 @@ def delete_task(task_id):
     return jsonify({"message": "Task deleted"})
 
 
-# ── WEBSOCKET EVENTS ───────────────────────────────────────────────────────────
+
 
 @socketio.on("connect")
 def on_connect():
@@ -135,7 +135,7 @@ def on_disconnect():
     print("Client disconnected")
 
 
-# ── EMAIL (Лаб 4) ──────────────────────────────────────────────────────────────
+
 
 @app.route("/email/send", methods=["POST"])
 def send_email():
